@@ -2,11 +2,11 @@ import { defineAstroPaperConfig } from "./src/types/config";
 
 export default defineAstroPaperConfig({
   site: {
-    url: "https://duohuo.example.com/",
+    url: "https://hub.nuist.dev/",
     title: "Nuist DEV",
     description: "记录开发实践、项目经验与技术探索",
     author: "Nuist DEV",
-    profile: "https://duohuo.example.com/",
+    profile: "https://hub.nuist.dev/",
     ogImage: "default-og.jpg",
     lang: "zh",
     timezone: "Asia/Shanghai",
