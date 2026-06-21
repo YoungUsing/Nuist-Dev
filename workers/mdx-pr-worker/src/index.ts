@@ -8,6 +8,7 @@ type Env = {
   GITHUB_OWNER?: string;
   GITHUB_REPO?: string;
   BASE_BRANCH?: string;
+  BASE_PATH?: string;
   TIMEZONE?: string;
 };
 
@@ -73,8 +74,9 @@ const MIME_BY_EXTENSION: Record<string, readonly string[]> = {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const basePath = normalizeBasePath(env.BASE_PATH ?? "/");
     try {
-      return await handleRequest(request, env);
+      return await handleRequest(request, env, basePath);
     } catch (error) {
       const message =
         error instanceof HttpError
@@ -83,26 +85,33 @@ export default {
       const status = error instanceof HttpError ? error.status : 500;
       return wantsJson(request)
         ? json({ ok: false, error: message }, status)
-        : html(renderErrorPage(message), status);
+        : html(renderErrorPage(message, basePath), status);
     }
   },
 };
 
-async function handleRequest(request: Request, env: Env): Promise<Response> {
+async function handleRequest(
+  request: Request,
+  env: Env,
+  basePath: string
+): Promise<Response> {
   const url = new URL(request.url);
-  const pathname = url.pathname.replace(/\/+$/, "") || "/";
+  const pathname = resolveAppPath(url.pathname, basePath);
+  if (!pathname) {
+    return html(renderErrorPage("页面不存在。", basePath), 404);
+  }
 
   if (request.method === "GET" && pathname === "/") {
     const session = await readSession(request, env);
-    return html(renderHomePage(session));
+    return html(renderHomePage(session, basePath));
   }
 
   if (request.method === "GET" && pathname === "/auth/github") {
-    return startGitHubOAuth(request, env);
+    return startGitHubOAuth(request, env, basePath);
   }
 
   if (request.method === "GET" && pathname === "/auth/github/callback") {
-    return finishGitHubOAuth(request, env);
+    return finishGitHubOAuth(request, env, basePath);
   }
 
   if (request.method === "POST" && pathname === "/api/submit") {
@@ -112,18 +121,19 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && pathname === "/logout") {
-    return redirect("/", [
+    return redirect(withBasePath(basePath, "/"), [
       clearCookie(SESSION_COOKIE),
       clearCookie(STATE_COOKIE),
     ]);
   }
 
-  return html(renderErrorPage("页面不存在。"), 404);
+  return html(renderErrorPage("页面不存在。", basePath), 404);
 }
 
 async function startGitHubOAuth(
   request: Request,
-  env: Env
+  env: Env,
+  basePath: string
 ): Promise<Response> {
   requireEnv(env, [
     "GITHUB_CLIENT_ID",
@@ -140,9 +150,10 @@ async function startGitHubOAuth(
     env.SESSION_SECRET
   );
   const origin = new URL(request.url).origin;
+  const callbackUrl = withBasePath(basePath, "/auth/github/callback");
   const authUrl = new URL("https://github.com/login/oauth/authorize");
   authUrl.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
-  authUrl.searchParams.set("redirect_uri", `${origin}/auth/github/callback`);
+  authUrl.searchParams.set("redirect_uri", `${origin}${callbackUrl}`);
   authUrl.searchParams.set("scope", "read:user");
   authUrl.searchParams.set("state", state);
 
@@ -153,7 +164,8 @@ async function startGitHubOAuth(
 
 async function finishGitHubOAuth(
   request: Request,
-  env: Env
+  env: Env,
+  basePath: string
 ): Promise<Response> {
   requireEnv(env, [
     "GITHUB_CLIENT_ID",
@@ -192,7 +204,7 @@ async function finishGitHubOAuth(
         client_id: env.GITHUB_CLIENT_ID,
         client_secret: env.GITHUB_CLIENT_SECRET,
         code,
-        redirect_uri: `${url.origin}/auth/github/callback`,
+        redirect_uri: `${url.origin}${withBasePath(basePath, "/auth/github/callback")}`,
       }),
     }
   );
@@ -231,7 +243,7 @@ async function finishGitHubOAuth(
   };
   const sessionToken = await createSignedToken(session, env.SESSION_SECRET);
 
-  return redirect("/", [
+  return redirect(withBasePath(basePath, "/"), [
     cookie(SESSION_COOKIE, sessionToken, SESSION_MAX_AGE_SECONDS),
     clearCookie(STATE_COOKIE),
   ]);
@@ -337,7 +349,7 @@ async function handleSubmit(
   };
 }
 
-function renderHomePage(session: Session | null): string {
+function renderHomePage(session: Session | null, basePath: string): string {
   const userBlock = session
     ? `<div class="user">
         ${
@@ -346,16 +358,20 @@ function renderHomePage(session: Session | null): string {
             : ""
         }
         <span>@${escapeHtml(session.login)}</span>
-        <form method="post" action="/logout"><button type="submit">退出</button></form>
+        <form method="post" action="${escapeAttr(
+          withBasePath(basePath, "/logout")
+        )}"><button type="submit">退出</button></form>
       </div>`
     : "";
 
   const content = session
-    ? renderSubmitForm(session)
+    ? renderSubmitForm(session, basePath)
     : `<section class="panel center">
         <h1>Nuist DEV 投稿</h1>
         <p>使用 GitHub 登录后提交 MDX 草稿，系统会自动创建 Pull Request。</p>
-        <a class="primary" href="/auth/github">使用 GitHub 登录</a>
+        <a class="primary" href="${escapeAttr(
+          withBasePath(basePath, "/auth/github")
+        )}">使用 GitHub 登录</a>
       </section>`;
 
   return `<!doctype html>
@@ -375,10 +391,13 @@ function renderHomePage(session: Session | null): string {
 </html>`;
 }
 
-function renderSubmitForm(session: Session): string {
+function renderSubmitForm(session: Session, basePath: string): string {
+  const submitAction = withBasePath(basePath, "/api/submit");
   return `<section class="panel">
     <h1>提交 MDX 草稿</h1>
-    <form id="submit-form" method="post" action="/api/submit" enctype="multipart/form-data">
+    <form id="submit-form" method="post" action="${escapeAttr(
+      submitAction
+    )}" enctype="multipart/form-data">
       <label>
         <span>标题</span>
         <input name="title" required maxlength="120" autocomplete="off" />
@@ -422,6 +441,7 @@ function renderSubmitForm(session: Session): string {
     const attachments = document.querySelector("#attachments");
     const cover = document.querySelector("#coverAttachment");
     const result = document.querySelector("#result");
+    const submitUrl = ${JSON.stringify(submitAction)};
 
     attachments.addEventListener("change", () => {
       const files = Array.from(attachments.files || []);
@@ -433,7 +453,7 @@ function renderSubmitForm(session: Session): string {
       event.preventDefault();
       result.className = "";
       result.textContent = "正在提交...";
-      const response = await fetch("/api/submit", {
+      const response = await fetch(submitUrl, {
         method: "POST",
         body: new FormData(form),
       });
@@ -451,7 +471,7 @@ function renderSubmitForm(session: Session): string {
   </script>`;
 }
 
-function renderErrorPage(message: string): string {
+function renderErrorPage(message: string, basePath: string): string {
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -465,7 +485,7 @@ function renderErrorPage(message: string): string {
       <section class="panel center">
         <h1>请求失败</h1>
         <p>${escapeHtml(message)}</p>
-        <a class="primary" href="/">返回首页</a>
+        <a class="primary" href="${escapeAttr(withBasePath(basePath, "/"))}">返回首页</a>
       </section>
     </main>
   </body>
@@ -1268,6 +1288,32 @@ function getShanghaiDateParts(timeZone: string): DateParts {
     dd,
     yyyymmdd: `${yyyy}${mm}${dd}`,
   };
+}
+
+function normalizeBasePath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  const normalized = `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
+  return normalized === "/" ? "/" : normalized;
+}
+
+function resolveAppPath(pathname: string, basePath: string): string | null {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  if (basePath === "/") return normalized;
+  if (normalized === basePath) return "/";
+  if (normalized.startsWith(`${basePath}/`)) {
+    return normalized.slice(basePath.length) || "/";
+  }
+  return null;
+}
+
+function withBasePath(basePath: string, path: string): string {
+  const normalizedBase = normalizeBasePath(basePath);
+  const normalizedPath = path === "/" ? "" : path.startsWith("/") ? path : `/${path}`;
+  if (normalizedBase === "/") {
+    return normalizedPath || "/";
+  }
+  return `${normalizedBase}${normalizedPath}`;
 }
 
 function baseName(path: string): string {

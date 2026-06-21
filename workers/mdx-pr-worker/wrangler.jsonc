@@ -1,12 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "nuist-dev-mdx-pr-worker",
+  "name": "nuist-dev-upload",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-21",
+  "routes": ["hub.nuist.dev/contribute/new", "hub.nuist.dev/contribute/new/*"],
   "vars": {
     "GITHUB_OWNER": "nuist-engineer-lion",
     "GITHUB_REPO": "Nuist-Dev",
     "BASE_BRANCH": "main",
+    "BASE_PATH": "/contribute/new",
     "TIMEZONE": "Asia/Shanghai"
   }
 }
