@@ -362,8 +362,84 @@ const pageDesc =
       if (!url) {
         return `\n\n> 未找到附件：${name}\n\n`;
       }
-      return url;
+      return `![${name}](${url})`;
     });
+  }
+
+  function escapeHtml(value: string) {
+    return value.replace(/[&<>"']/g, char => {
+      const entities: Record<string, string> = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      };
+      return entities[char] || char;
+    });
+  }
+
+  function renderFallbackMarkdown(markdown: string) {
+    const blocks: string[] = [];
+    const stash = (html: string) => {
+      const token = `\u0000BLOCK${blocks.length}\u0000`;
+      blocks.push(html);
+      return token;
+    };
+
+    let source = markdown.replace(
+      /```([A-Za-z0-9_-]+)?\n([\s\S]*?)```/g,
+      (_match, rawLang: string, rawCode: string) => {
+        const lang = rawLang ? ` data-lang="${escapeHtml(rawLang)}"` : "";
+        return stash(
+          `<pre${lang}><code>${escapeHtml(String(rawCode).replace(/\n$/, ""))}</code></pre>`
+        );
+      }
+    );
+
+    source = source
+      .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+      .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+      .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+      .replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>")
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    const paragraphs = source
+      .split(/\n{2,}/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => {
+        if (/^<(?:(?:h[1-6])|blockquote|pre|ul|ol|img|table)\b/.test(part)) {
+          return part;
+        }
+        if (/^(?:[-*] .+(?:\n|$))+/.test(part)) {
+          const items = part
+            .split("\n")
+            .map(item => item.replace(/^[-*]\s+/, "").trim())
+            .filter(Boolean)
+            .map(item => `<li>${item}</li>`)
+            .join("");
+          return `<ul>${items}</ul>`;
+        }
+        if (/^(?:\d+\. .+(?:\n|$))+/.test(part)) {
+          const items = part
+            .split("\n")
+            .map(item => item.replace(/^\d+\.\s+/, "").trim())
+            .filter(Boolean)
+            .map(item => `<li>${item}</li>`)
+            .join("");
+          return `<ol>${items}</ol>`;
+        }
+        return `<p>${part.replace(/\n/g, "<br />")}</p>`;
+      })
+      .join("\n");
+
+    return blocks.reduce(
+      (html, block, index) => html.replace(`\u0000BLOCK${index}\u0000`, block),
+      paragraphs
+    );
   }
 
   function renderPreview() {
@@ -378,16 +454,14 @@ const pageDesc =
       return;
     }
 
-    if (!window.marked || !window.DOMPurify) {
-      previewPanel.innerHTML =
-        '<p class="text-muted-foreground">预览组件还在加载，请稍后再试。</p>';
-      return;
-    }
-
-    const html = window.marked.parse(source);
-    previewPanel.innerHTML = window.DOMPurify.sanitize(html, {
-      ADD_ATTR: ["target"],
-    });
+    const html = window.marked
+      ? window.marked.parse(source)
+      : renderFallbackMarkdown(escapeHtml(source));
+    previewPanel.innerHTML = window.DOMPurify
+      ? window.DOMPurify.sanitize(html, {
+          ADD_ATTR: ["target", "data-lang"],
+        })
+      : html;
 
     for (const link of previewPanel.querySelectorAll("a")) {
       link.setAttribute("target", "_blank");
@@ -516,13 +590,28 @@ const pageDesc =
   }
 
   .github-preview pre {
+    border: 1px solid var(--border);
     overflow-x: auto;
     padding: 1rem;
+    position: relative;
+  }
+
+  .github-preview pre[data-lang]::before {
+    color: var(--muted-foreground);
+    content: attr(data-lang);
+    font-size: 0.75rem;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
   }
 
   .github-preview pre code {
     background: transparent;
+    display: block;
+    font-size: 0.875rem;
+    line-height: 1.6;
     padding: 0;
+    white-space: pre;
   }
 
   .github-preview a {
