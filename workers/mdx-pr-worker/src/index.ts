@@ -1551,7 +1551,7 @@ async function createAppJWT(
   const signature = await crypto.subtle.sign(
     "RSASSA-PKCS1-v1_5",
     key,
-    ENCODER.encode(signingInput)
+      ENCODER.encode(signingInput) as BufferSource
   );
   const signatureB64 = base64UrlEncode(new Uint8Array(signature));
   return `${signingInput}.${signatureB64}`;
@@ -1568,7 +1568,7 @@ async function importAppPrivateKey(pem: string): Promise<CryptoKey> {
   const pkcs8Der = isPkcs1 ? wrapRsaPkcs1AsPkcs8(der) : der;
   return crypto.subtle.importKey(
     "pkcs8",
-    pkcs8Der,
+    pkcs8Der as BufferSource,
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
     false,
     ["sign"]
@@ -1666,7 +1666,7 @@ async function sign(input: string, secret: string): Promise<string> {
   const signature = await crypto.subtle.sign(
     "HMAC",
     key,
-    ENCODER.encode(input)
+      ENCODER.encode(input) as BufferSource
   );
   return base64UrlEncode(new Uint8Array(signature));
 }
