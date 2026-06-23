@@ -29,10 +29,6 @@ export async function uploadAttachmentsToImageBed(
 
   const baseUrl = normalizeBaseUrl(env.IMGBED_URL ?? DEFAULT_IMGBED_URL);
   const token = env.IMGBED_TOKEN?.trim();
-  if (!token) {
-    throw new Error("Missing IMGBED_TOKEN for attachment uploads.");
-  }
-
   const prefix = normalizeFolderPrefix(
     env.IMGBED_FOLDER_PREFIX ?? DEFAULT_FOLDER_PREFIX
   );
@@ -43,19 +39,23 @@ export async function uploadAttachmentsToImageBed(
   await Promise.all(
     attachments.map(async attachment => {
       const form = new FormData();
+      const fileBytes = cloneToArrayBuffer(attachment.bytes);
       form.set(
         "file",
-        new File([attachment.bytes], attachment.safeName, {
+        new File([fileBytes], attachment.safeName, {
           type: attachment.mime || "application/octet-stream",
         })
       );
       form.set("folder", folder);
 
+      const headers = new Headers();
+      if (token) {
+        headers.set("X-Upload-Token", token);
+      }
+
       const response = await fetch(`${baseUrl}/_upload`, {
         method: "POST",
-        headers: {
-          "X-Upload-Token": token,
-        },
+        headers,
         body: form,
       });
 
@@ -63,7 +63,12 @@ export async function uploadAttachmentsToImageBed(
         throw new Error(await buildUploadError(response));
       }
 
-      attachment.contentPath = buildPublicUrl(baseUrl, folder, attachment.safeName);
+      attachment.contentPath = await resolveUploadedUrl(
+        response,
+        baseUrl,
+        folder,
+        attachment.safeName
+      );
     })
   );
 }
@@ -106,11 +111,46 @@ function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
+function cloneToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function normalizeFolderPrefix(value: string): string {
   return value
     .trim()
     .replace(/^\/+|\/+$/g, "")
     .replace(/\/{2,}/g, "/");
+}
+
+async function resolveUploadedUrl(
+  response: Response,
+  baseUrl: string,
+  folder: string,
+  fallbackFileName: string
+): Promise<string> {
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      const payload = (await response.json()) as {
+        url?: unknown;
+        path?: unknown;
+      };
+
+      if (typeof payload.url === "string" && payload.url.trim()) {
+        return payload.url.trim();
+      }
+
+      if (typeof payload.path === "string" && payload.path.trim()) {
+        return new URL(payload.path.trim(), `${baseUrl}/`).toString();
+      }
+    } catch {
+      // Fall back to deterministic URL handling.
+    }
+  }
+
+  return buildPublicUrl(baseUrl, folder, fallbackFileName);
 }
 
 function buildPublicUrl(baseUrl: string, folder: string, fileName: string): string {
