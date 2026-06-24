@@ -356,6 +356,7 @@ async function handleSubmit(
     commitMessage: `docs: 添加投稿《${title}》`,
     body: buildPullRequestBody({
       submitter: session.login,
+      author,
       articlePath,
       attachmentPaths: attachments.map(attachment => attachment.contentPath),
       coverPath,
@@ -1412,6 +1413,7 @@ async function assertPathsDoNotExist(
 
 function buildPullRequestBody(input: {
   submitter: string;
+  author: string;
   articlePath: string;
   attachmentPaths: string[];
   coverPath?: string;
@@ -1425,7 +1427,7 @@ function buildPullRequestBody(input: {
 
 通过 Nuist DEV MDX 投稿 Worker 自动创建。
 
-投稿人：@${input.submitter}
+作者：${input.author}（@${input.submitter}）
 
 文章路径：\`${input.articlePath}\`
 
