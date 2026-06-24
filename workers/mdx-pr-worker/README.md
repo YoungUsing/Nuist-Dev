@@ -41,7 +41,7 @@ pnpm worker:typecheck
 - 文章写入 `src/content/posts/yy/mm/{slug}.mdx`。
 - 附件上传到独立图床 `https://imgbed.nuist.dev/`。
 - 附件只支持 `png`、`jpg`、`jpeg`、`webp`、`avif`、`gif`、`svg`。
-- 正文使用 `{{file:name.png}}` 引用附件；提交时会替换成图床绝对 URL。
+- 在正文里插入图片请使用 `![图片说明]({{file:name.png}})`；提交时占位符会替换成图床绝对 URL。
 - 新文章默认 `draft: false`，合并前由维护者审核。
 
 ## Image bed
