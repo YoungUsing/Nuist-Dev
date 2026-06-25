@@ -356,6 +356,7 @@ async function handleSubmit(
     commitMessage: `docs: 添加投稿《${title}》`,
     body: buildPullRequestBody({
       submitter: session.login,
+      author,
       articlePath,
       attachmentPaths: attachments.map(attachment => attachment.contentPath),
       coverPath,
@@ -441,8 +442,8 @@ function renderIntroPanel(basePath: string): string {
       <p class="section-kicker">开始前</p>
       <h2>登录后就能提交</h2>
       <p class="section-copy">
-        表单会自动生成 frontmatter，发布时间由服务器锁定为 Asia/Shanghai 当前时间。附件只接受图片，正文里用
-        <code>{{file:name.png}}</code> 引用。
+        表单会自动生成 frontmatter，发布时间由服务器锁定为 Asia/Shanghai 当前时间。附件只接受图片，插入图片请写
+        <code>![图片说明]({{file:name.png}})</code>。
       </p>
     </div>
     <div class="intro__actions">
@@ -493,7 +494,7 @@ function renderSubmitForm(session: Session, basePath: string): string {
       </label>
       <label class="field">
         <span>正文 MDX</span>
-        <textarea class="body" name="body" required rows="18" placeholder="正文里用 {{file:diagram.png}} 引用上传图片。"></textarea>
+        <textarea class="body" name="body" required rows="18" placeholder="插入图片请写 ![图片说明]({{file:diagram.png}}) 。"></textarea>
       </label>
       <div class="field-grid">
         <label class="field">
@@ -527,7 +528,7 @@ function renderSubmitForm(session: Session, basePath: string): string {
       </div>
       <ul class="notes">
         <li>发布时间由服务器按 Asia/Shanghai 当前时间生成，不接受手填。</li>
-        <li>附件只允许图片，正文用 <code>{{file:name.png}}</code> 引用。</li>
+        <li>附件只允许图片；插入图片请写 <code>![图片说明]({{file:name.png}})</code>。</li>
         <li>附件至少要被正文引用一次，或被选作封面图。</li>
         <li>新文章默认进入 <code>draft: false</code>。</li>
       </ul>
@@ -994,7 +995,26 @@ function validateArticleInput(input: {
   if (input.body.trimStart().startsWith("---")) {
     throw new HttpError(400, "正文不能包含 frontmatter。");
   }
+  validateMdxMarkup(input.body);
   rejectDangerousImports(input.body);
+}
+
+function validateMdxMarkup(body: string): void {
+  const protectedBody = stripCodeContent(body);
+  const malformedQuotedAttribute = /<[A-Za-z][^>\n]*\b[A-Za-z_:][\w:.-]*\s*["']/;
+
+  if (malformedQuotedAttribute.test(protectedBody)) {
+    throw new HttpError(
+      400,
+      "检测到无效的 HTML/MDX 写法。"
+    );
+  }
+}
+
+function stripCodeContent(value: string): string {
+  return value
+    .replace(/(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g, "\n")
+    .replace(/`[^`\n]+`/g, "");
 }
 
 function rejectDangerousImports(body: string): void {
@@ -1393,6 +1413,7 @@ async function assertPathsDoNotExist(
 
 function buildPullRequestBody(input: {
   submitter: string;
+  author: string;
   articlePath: string;
   attachmentPaths: string[];
   coverPath?: string;
@@ -1406,7 +1427,7 @@ function buildPullRequestBody(input: {
 
 通过 Nuist DEV MDX 投稿 Worker 自动创建。
 
-投稿人：@${input.submitter}
+作者：${input.author}（@${input.submitter}）
 
 文章路径：\`${input.articlePath}\`
 
@@ -1419,26 +1440,7 @@ function buildPullRequestBody(input: {
 附件：
 ${attachmentLines}
 
-## Types of changes
-
-- [ ] Bug Fix (non-breaking change which fixes an issue)
-- [ ] New Feature (non-breaking change which adds functionality)
-- [x] Documentation Update (if none of the other choices apply)
-- [ ] Others (any other types not listed above)
-
-## Checklist
-
-- [ ] I have read the [Contributing Guide](https://github.com/satnaing/astro-paper/blob/main/.github/CONTRIBUTING.md)
-- [ ] I have added the necessary documentation (if appropriate)
-- [ ] Breaking Change (fix or feature that would cause existing functionality to not work as expected)
-
-## Further comments
-
-新文章默认 \`draft: false\`，请审核后再发布。
-
-## Related Issue
-
-Closes: #`;
+`;
 }
 
 async function githubJson<T>(
